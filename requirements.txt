@@ -4,6 +4,10 @@ pdf2image>=1.17      # rasterize scanned PDFs  (needs system `poppler`)
 Pillow>=10.0
 openpyxl>=3.1        # spreadsheet output
 
+# GUI (optional — only needed if running gui.py or building the .app)
+tkinterdnd2>=0.3     # native drag-and-drop in the GUI
+pyinstaller>=6.0     # build macOS .app (only needed for packaging)
+
 # System packages required (install separately):
 #   Debian/Ubuntu:  apt-get install tesseract-ocr poppler-utils
 #   macOS (brew):   brew install tesseract poppler

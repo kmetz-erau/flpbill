@@ -80,11 +80,36 @@ all — those are flagged as misclassified regardless of load factor.
 
 ```
 extract_bills.py   CLI orchestrator + spreadsheet writer
+gui.py             Desktop GUI (drag-and-drop)
+build_app.py       Packages gui.py as a macOS .app
 fpl_parser.py      text/OCR extraction and the FPL field-regex map
 rates.py           Jan-2026 tariff constants + screening logic
 tests/             pytest suite for the rate logic
 samples/           demo bills + make_samples.py to regenerate them
 ```
+
+## Desktop GUI
+
+For non-terminal users, `gui.py` provides a drag-and-drop interface. Run it
+directly or build a macOS `.app` you can double-click from Finder.
+
+**Run directly:**
+
+```bash
+source .venv/bin/activate
+python gui.py
+```
+
+**Build a standalone .app:**
+
+```bash
+pip install pyinstaller
+python build_app.py
+```
+
+This creates `dist/FPL Bill Extractor.app`. Zip it to share with colleagues.
+Recipients still need `brew install tesseract poppler` for scanned-bill OCR;
+digital PDFs work without them.
 
 ## Tuning to your bills
 
