@@ -1,0 +1,9 @@
+pymupdf>=1.24        # digital-PDF text layer
+pytesseract>=0.3.10  # OCR for scanned bills  (needs system `tesseract`)
+pdf2image>=1.17      # rasterize scanned PDFs  (needs system `poppler`)
+Pillow>=10.0
+openpyxl>=3.1        # spreadsheet output
+
+# System packages required (install separately):
+#   Debian/Ubuntu:  apt-get install tesseract-ocr poppler-utils
+#   macOS (brew):   brew install tesseract poppler
