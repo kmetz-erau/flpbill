@@ -57,8 +57,10 @@ REGEX_MAP = {
         r"account\s*(?:number|no\.?|#)\s*[:\-]?\s*(?P<v>[\d\-]{6,})",
     ],
     "meter_number": [
-        r"meter\s*(?:number|no\.?|#|reading)\s*[:\-]?\s*(?P<v>[A-Z0-9]{5,})",
-        r"meter\s*[:\-]\s*(?P<v>[A-Z0-9]{5,})",
+        # "Meter reading - Meter MV51029" — require at least one digit
+        # (excludes "SUMMARY", "reading", etc.)
+        r"[Mm]eter\s+(?P<v>(?=\S*\d)[A-Z0-9]{5,})\b",
+        r"meter\s*(?:number|no\.?|#)\s*[:\-]?\s*(?P<v>(?=\S*\d)[A-Z0-9]{5,})",
     ],
     "rate_schedule": [
         r"rate\s*(?:schedule)?\s*[:\-]?\s*(?P<v>GSLDT?-\d|GSDT?-\d|GST?-\d|"
@@ -78,32 +80,40 @@ REGEX_MAP = {
         r"(?P<v>\d{1,2})\s*(?:billing\s*)?days",
     ],
     "kwh_total": [
-        r"(?:total\s+)?(?:kwh\s+used|energy\s+used|total\s+kwh)\D{0,10}" + _NUM,
-        r"(?P<v>[\d,]+)\s*kwh\b",
+        # ENERGY USAGE COMPARISON section: line starts with "kWh Used  55560"
+        # (not preceded by on/off-peak)
+        r"^\s*kwh\s+used\s+(?P<v>\d[\d,]*)\s*$",
     ],
     "kwh_on_peak": [
-        r"on[\-\s]*peak\s+(?:kwh|energy)\D{0,10}" + _NUM,
+        r"on[\-\s]*peak\s+kwh\s+used?\s+(?P<v>\d{3,})\s*$",
     ],
     "kwh_off_peak": [
-        r"off[\-\s]*peak\s+(?:kwh|energy)\D{0,10}" + _NUM,
+        r"off[\-\s]*peak\s+kwh\s+used?\s+(?P<v>\d{3,})\s*$",
     ],
     "demand_kw_billed": [
         r"billing\s+demand\D{0,10}" + _NUM,
         r"billed\s+(?:kw|demand)\D{0,10}" + _NUM,
     ],
     "demand_kw_actual": [
-        r"(?:measured|actual|max(?:imum)?)\s+demand\D{0,10}" + _NUM,
+        # "Maximum demand  114" as standalone (comparison section)
+        r"max(?:imum)?\s+demand\s+(?P<v>\d[\d,]*(?:\.\d+)?)\s*$",
+        r"(?:measured|actual)\s+demand\D{0,10}" + _NUM,
         r"demand\s*\(kw\)\D{0,10}" + _NUM,
     ],
     "demand_kw_on_peak": [
         r"on[\-\s]*peak\s+demand\D{0,10}" + _NUM,
     ],
     "total_amount_due": [
-        r"(?:total\s+amount\s+you\s+owe|amount\s+due|total\s+current\s+charges|"
-        r"total\s+due)\D{0,10}\$?\s*" + _NUM,
+        # label then $amount (BILL SUMMARY section)
+        r"(?:total\s+amount\s+you\s+owe|total\s+new\s+charges|amount\s+due|"
+        r"total\s+current\s+charges|total\s+due)\D{0,6}\$\s*" + _NUM,
+        # $amount then label (page header on OCR'd bills)
+        r"\$\s*" + _NUM + r"\s{0,30}(?:total\s+amount\s+you\s+owe)",
     ],
     "statement_date": [
         r"(?:statement|bill|invoice)\s+date\D{0,10}" + _DATE,
+        # "Statement Date: Jun 16, 2026" (month-name format)
+        r"statement\s+date\s*[:\-]?\s*(?P<v>[A-Z][a-z]{2}\s+\d{1,2},?\s+\d{4})",
     ],
 }
 
@@ -121,15 +131,45 @@ def _clean_num(s):
         return None
 
 
+def _last_number_on_line(text, label_pattern):
+    """Find a line matching label_pattern and return its LAST number.
+
+    FPL meter-summary lines look like:
+        Total kWh used  43349  42886  120  55560
+    where the last number (55560) is the actual usage. Standard regex
+    grabs the first (43349 = current reading), which is wrong.
+    """
+    for line in text.split("\n"):
+        if re.search(label_pattern, line, re.IGNORECASE):
+            nums = re.findall(r"\d[\d,]*(?:\.\d+)?", line)
+            if nums:
+                return _clean_num(nums[-1])
+    return None
+
+
 def parse_fields(text):
     """Apply REGEX_MAP to a text blob; return a dict of field -> value."""
     flat = re.sub(r"[ \t]+", " ", text)
     out = {k: None for k in REGEX_MAP}
     for field, patterns in REGEX_MAP.items():
         for pat in patterns:
-            m = re.search(pat, flat, re.IGNORECASE)
+            m = re.search(pat, flat, re.IGNORECASE | re.MULTILINE)
             if m:
                 val = m.group("v").strip()
                 out[field] = _clean_num(val) if field in _NUMERIC_FIELDS else val
                 break
+    # Fallback: for kWh fields, if regex missed (common with meter-summary
+    # lines), grab the LAST number on the matching line.
+    if out["kwh_total"] is None:
+        out["kwh_total"] = _last_number_on_line(text, r"total\s+kwh\s+used")
+    if out["kwh_on_peak"] is None:
+        out["kwh_on_peak"] = _last_number_on_line(text, r"on[\-\s]*peak\s+kwh\s+used")
+    if out["kwh_off_peak"] is None:
+        out["kwh_off_peak"] = _last_number_on_line(text, r"off[\-\s]*peak\s+kwh\s+used")
+    if out["demand_kw_on_peak"] is not None and out["demand_kw_on_peak"] < 1:
+        # Meter line: "On-peak demand 0.95 120.00 114" — grabbed 0.95 (multiplier)
+        # instead of 114. Fall back to last number.
+        val = _last_number_on_line(text, r"on[\-\s]*peak\s+demand")
+        if val and val > out["demand_kw_on_peak"]:
+            out["demand_kw_on_peak"] = val
     return out
