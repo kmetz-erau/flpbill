@@ -1,0 +1,110 @@
+name: Build Desktop Apps
+
+on:
+  push:
+    tags:
+      - 'v*'   # only builds on version tags: git tag v1.0 && git push --tags
+  workflow_dispatch:   # also allows manual trigger from GitHub Actions tab
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Tesseract
+        run: |
+          choco install tesseract -y
+          echo "C:\Program Files\Tesseract-OCR" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - name: Install Poppler
+        run: |
+          choco install poppler -y
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build .exe
+        run: |
+          pyinstaller --name="FPL Bill Extractor" --windowed --onedir --noconfirm --clean --add-data="rates.py;." --add-data="fpl_parser.py;." --hidden-import=fitz --hidden-import=pytesseract --hidden-import=pdf2image --hidden-import=PIL --hidden-import=openpyxl gui.py
+
+      - name: Bundle Tesseract into dist
+        run: |
+          Copy-Item -Recurse "C:\Program Files\Tesseract-OCR" "dist\FPL Bill Extractor\tesseract"
+
+      - name: Zip it
+        run: |
+          Compress-Archive -Path "dist\FPL Bill Extractor" -DestinationPath "FPL-Bill-Extractor-Windows.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: FPL-Bill-Extractor-Windows.zip
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system deps
+        run: |
+          brew install tesseract poppler
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build .app
+        run: |
+          pyinstaller --name="FPL Bill Extractor" --windowed --onedir --noconfirm --clean --add-data="rates.py:." --add-data="fpl_parser.py:." --hidden-import=fitz --hidden-import=pytesseract --hidden-import=pdf2image --hidden-import=PIL --hidden-import=openpyxl gui.py
+
+      - name: Zip it
+        run: |
+          cd dist && zip -rq "../FPL-Bill-Extractor-Mac.zip" "FPL Bill Extractor.app"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-build
+          path: FPL-Bill-Extractor-Mac.zip
+
+  release:
+    needs: [build-windows, build-mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            windows-build/FPL-Bill-Extractor-Windows.zip
+            mac-build/FPL-Bill-Extractor-Mac.zip
+          body: |
+            ## FPL Bill Extractor
+
+            Download the zip for your platform, unzip, and double-click to run.
+
+            **Windows:** Unzip, open the folder, double-click `FPL Bill Extractor.exe`
+            **Mac:** Unzip, double-click `FPL Bill Extractor.app` (right-click → Open the first time)
+
+            No Python, no terminal, no setup required.
