@@ -18,6 +18,16 @@ from tkinter import ttk, filedialog, messagebox
 # When bundled by PyInstaller, modules are inside the temp dir.
 if getattr(sys, "frozen", False):
     sys.path.insert(0, sys._MEIPASS)
+    # Use bundled tesseract if present (Windows .exe build)
+    bundled_tess = os.path.join(os.path.dirname(sys.executable), "tesseract")
+    if os.path.isdir(bundled_tess):
+        os.environ["PATH"] = bundled_tess + os.pathsep + os.environ.get("PATH", "")
+        try:
+            import pytesseract
+            pytesseract.pytesseract.tesseract_cmd = os.path.join(
+                bundled_tess, "tesseract.exe")
+        except ImportError:
+            pass
 
 import fpl_parser
 import rates
